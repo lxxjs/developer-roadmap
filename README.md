@@ -76,6 +76,21 @@ Tests/SharedTests/  Shared 레이어 유닛 테스트
 | **폴리라인 단순화** (`tolerance: 2m`) | 5m 간격 601점(3km) 경로가 10점 안팎으로 줄고 전체 길이 오차는 수 m 이내. `updateApplicationContext`의 약 262KB 한계에 한참 못 미친다. → `testSimplificationKeepsShapeAndRespectsCap` |
 | **단순화 캡은 데시메이션으로 처리** (`tolerance * 4` 상한) | 점 수 캡을 맞추려 tolerance를 무제한 올리면 실제 코너가 지워진다. 정점이 직선에서 20m 벗어난 4km 지그재그는 tolerance 20m를 넘는 순간 **직선 2점으로 붕괴**해서, 화살표가 경로가 아니라 목적지를 가리키게 된다. 상한을 넘으면 균등 데시메이션으로 넘긴다 — 해상도는 낮아지지만 남는 점은 모두 원본 경로 위의 실제 정점이다. → `testSimplificationUnderCapKeepsShapeRatherThanFlattening` |
 
+### 워치 화면 예산
+
+문자 수는 워치에서 틀린 단위다. 한글 한 글자는 라틴 문자의 약 2배 폭이라
+"우회전 후 직진"과 "turn right then go"는 길이가 비슷해도 화면에서 전혀 다르다.
+`DisplayText`는 전각 문자를 2셀로 세는 **표시 폭**으로 잰다.
+
+예산은 watchOS 10이 도는 가장 작은 기종(40mm Series 4/5/6, 폭 162pt)을 기준으로
+캡션 한 줄 20셀, 헤더 18셀이다. 이게 필요한 이유는 MapKit의 한국어 도보 안내문이
+길어서다 — "테헤란로 방면으로 우회전한 다음 100미터 직진하세요"는 38셀로,
+`.lineLimit(1)`에 걸려 의미 없이 잘린다. 지금은 단어 경계에서 자르고 말줄임표를
+붙인다. → `testVerboseKoreanInstructionIsCutToFit`
+
+화살표는 1도 미만 변화면 재발행하지 않는다. 자력계는 초당 여러 번 보고하고
+발행마다 뷰가 무효화되는데, 40mm 화면에서 1도 미만은 보이지 않는다.
+
 접평면(local tangent plane) 근사는 세그먼트 단위 계산에만 쓴다. 왕복 오차는 1.8km에서
 5cm로, 보행 GPS 노이즈보다 훨씬 작다. → `testLocalOffsetRoundTrips`
 
@@ -115,13 +130,30 @@ Xcode에서 한 번만 설정할 것:
    `Info.plist`/entitlements에서 함께 바꿔야 한다(워치의 `WKCompanionAppBundleIdentifier`
    는 아이폰 앱 번들 ID와 정확히 일치해야 한다).
 
-테스트는 Xcode 없이도 돌 수 있다:
+테스트는 Xcode 없이도 돌 수 있다. Shared 레이어는 Linux에서도 컴파일되므로
+macOS·Linux 어디서든 실행된다:
 
 ```bash
-swift test          # Shared 레이어만 (macOS)
+swift test          # Shared 레이어 80개 테스트
 ```
 
 Xcode에서는 `WalkArrow` 스킴의 `WalkArrowTests`로 같은 테스트가 돈다.
+
+### 검증 상태
+
+| 대상 | 상태 |
+|---|---|
+| Shared 모듈 컴파일 | Swift 5.10.1로 검증 (경고 없음) |
+| Shared 테스트 80개 | 전부 통과 |
+| E2E 통합 테스트 7개 | 전부 통과 (공유 파싱 → 저장 → 페이로드 전송 → 700m 주행 → 도착) |
+| 워치 표시 예산 12개 | 전부 통과 (표시 폭, 화살표 회전) |
+| 워치/iOS/공유확장 16개 파일 | `swiftc -parse` 구문 검사 통과 |
+| **watchOS 앱 빌드** | **미검증 — macOS + Xcode 필요** |
+| SwiftUI 렌더링·실기기 동작 | 미검증 — 실기기 필요 |
+
+`swiftc -parse`는 구문만 본다. SwiftUI 뷰 빌더의 타입 추론이나 WatchKit·MapKit
+API 시그니처는 Linux에 해당 SDK가 없어 확인되지 않았으므로, Xcode 첫 빌드에서
+타입 오류가 나올 수 있다.
 
 ## 실기기에서 확인할 것
 

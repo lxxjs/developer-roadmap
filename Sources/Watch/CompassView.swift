@@ -18,7 +18,7 @@ struct CompassView: View {
     // MARK: - Pieces
 
     private var header: some View {
-        Text(model.route?.destination.name ?? "목적지")
+        Text(model.route.map { DisplayText.compactPlaceName($0.destination.name) } ?? "목적지")
             .font(.caption2)
             .foregroundStyle(.secondary)
             .lineLimit(1)
@@ -109,7 +109,7 @@ struct CompassView: View {
                 .font(.caption2)
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
-        } else if let instruction = guidance.instruction {
+        } else if let instruction = DisplayText.compactInstruction(guidance.instruction) {
             Text(instruction)
                 .font(.caption2)
                 .foregroundStyle(.secondary)

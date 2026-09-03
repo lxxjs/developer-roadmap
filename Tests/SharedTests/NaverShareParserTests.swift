@@ -108,6 +108,22 @@ final class NaverShareParserTests: XCTestCase {
         XCTAssertNil(parsed.point)
     }
 
+    /// Naver's share text sometimes omits the scheme.
+    func testSchemelessNaverLinkIsRecovered() {
+        XCTAssertEqual(
+            NaverShareParser.extractURL(from: "여기야 naver.me/xAbCdEf")?.absoluteString,
+            "https://naver.me/xAbCdEf"
+        )
+    }
+
+    /// A link ending a sentence must not swallow the punctuation.
+    func testTrailingPunctuationIsNotPartOfTheLink() {
+        XCTAssertEqual(
+            NaverShareParser.extractURL(from: "여기로 와 https://naver.me/xAbCdEf.")?.absoluteString,
+            "https://naver.me/xAbCdEf"
+        )
+    }
+
     func testShortlinkDetection() {
         XCTAssertTrue(NaverShareParser.isShortlink(URL(string: "https://naver.me/xAbCdEf")!))
         XCTAssertFalse(NaverShareParser.isShortlink(URL(string: "https://map.naver.com/v5/")!))

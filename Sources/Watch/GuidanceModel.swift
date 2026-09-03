@@ -46,6 +46,9 @@ final class GuidanceModel: ObservableObject {
     private var lastRerouteRequest: Date?
     private let rerouteCooldown: TimeInterval = 20
 
+    /// Degrees the arrow must move before the view is asked to redraw.
+    private let minimumVisibleRotation: Double = 1
+
     private var hasAnnouncedArrival = false
     private var hasAnnouncedOffRoute = false
     private var lastTurnWarningDistance: Double?
@@ -159,13 +162,21 @@ final class GuidanceModel: ObservableObject {
 
     /// Rotates the arrow to `bearing - heading`, accumulated so it never spins
     /// the long way round when the value wraps past ±180°.
+    ///
+    /// Publishes only once the angle has actually moved. The magnetometer
+    /// reports many times a second, and every published change invalidates the
+    /// view; sub-degree jitter is invisible on a 40 mm screen but would redraw
+    /// it just as often.
     private func updateArrow(for guidance: RouteGuidance) {
         guard let bearing = guidance.bearing, let heading = location.heading else {
             isArrowResolved = false
             return
         }
         rotation.update(to: GeoMath.relativeAngle(target: bearing, heading: heading))
-        arrowRotation = rotation.value
+
+        if !isArrowResolved || abs(rotation.value - arrowRotation) >= minimumVisibleRotation {
+            arrowRotation = rotation.value
+        }
         isArrowResolved = true
     }
 
@@ -234,24 +245,5 @@ final class GuidanceModel: ObservableObject {
         hasAnnouncedArrival = false
         hasAnnouncedOffRoute = false
         lastTurnWarningDistance = nil
-    }
-}
-
-/// Turns a wrapped angle into a continuously increasing one.
-///
-/// SwiftUI's `rotationEffect` interpolates between the numbers it is given, so
-/// handing it 179° then -179° makes the arrow sweep the whole way round instead
-/// of nudging 2°. Accumulating the signed deltas keeps every change short.
-struct RotationAccumulator {
-    private(set) var value: Double = 0
-    private var last: Double?
-
-    mutating func update(to angle: Double) {
-        if let last {
-            value += GeoMath.relativeAngle(target: angle, heading: last)
-        } else {
-            value = angle
-        }
-        last = angle
     }
 }

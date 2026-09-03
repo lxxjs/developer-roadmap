@@ -1,4 +1,10 @@
 import Foundation
+#if canImport(FoundationNetworking)
+// `URLSession` lives in Foundation on Apple platforms but in a separate module
+// in swift-corelibs-foundation. Importing it conditionally keeps this file
+// building on Linux, which is where the shared layer's tests run.
+import FoundationNetworking
+#endif
 
 /// Expands a `naver.me` shortlink into the full map URL that carries the
 /// coordinates.
@@ -22,6 +28,10 @@ struct NaverShortlinkResolver {
     /// A `HEAD` is enough — we only want the redirect target, not the page —
     /// and the timeout is short because the share sheet is blocking on this and
     /// manual entry is always available as a fallback.
+    ///
+    /// Uses the completion-handler API wrapped in a continuation rather than
+    /// `data(for:)`: the async form is missing from swift-corelibs-foundation,
+    /// and this spelling behaves identically on both platforms.
     func resolve(_ url: URL) async throws -> URL {
         guard NaverShareParser.isShortlink(url) else { throw ResolveError.notAShortlink }
 
@@ -29,8 +39,20 @@ struct NaverShortlinkResolver {
         request.httpMethod = "HEAD"
         request.timeoutInterval = 8
 
-        let (_, response) = try await session.data(for: request)
-        guard let finalURL = (response as? HTTPURLResponse)?.url, finalURL != url else {
+        let response: URLResponse = try await withCheckedThrowingContinuation { continuation in
+            let task = session.dataTask(with: request) { _, response, error in
+                if let response {
+                    continuation.resume(returning: response)
+                } else {
+                    continuation.resume(throwing: error ?? ResolveError.noRedirect)
+                }
+            }
+            task.resume()
+        }
+
+        // `URLSession` follows redirects itself, so the response's URL is the
+        // landing page rather than the shortlink we asked for.
+        guard let finalURL = response.url, finalURL != url else {
             throw ResolveError.noRedirect
         }
         return finalURL

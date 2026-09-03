@@ -1,7 +1,10 @@
 import Foundation
 
 /// What we managed to pull out of a Naver Map share.
-struct ParsedNaverPlace: Equatable, Sendable {
+///
+/// Not `Sendable`: it carries a `URL`, which is not `Sendable` in
+/// swift-corelibs-foundation, and nothing here crosses an actor boundary.
+struct ParsedNaverPlace: Equatable {
     var name: String?
     var point: GeoPoint?
     var address: String?
@@ -232,15 +235,43 @@ enum NaverShareParser {
         return cleanedName(last)
     }
 
+    /// Pulls the most relevant link out of a share.
+    ///
+    /// Hand-rolled rather than `NSDataDetector`, for two reasons: the detector
+    /// does not exist in swift-corelibs-foundation, which would leave this
+    /// untestable anywhere but Apple platforms, and an explicit pattern is
+    /// easier to reason about than its heuristics.
     static func extractURL(from text: String) -> URL? {
-        guard let detector = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.link.rawValue) else {
-            return nil
-        }
-        let range = NSRange(text.startIndex..<text.endIndex, in: text)
-        let matches = detector.matches(in: text, range: range).compactMap(\.url)
+        let schemed = matches(of: #"(?:https?|nmap)://[^\s<>"']+"#, in: text)
+            .compactMap { URL(string: $0) }
 
         // Prefer a link we recognise over any other link in the message.
-        return matches.first(where: isNaverMapURL) ?? matches.first
+        if let naver = schemed.first(where: isNaverMapURL) { return naver }
+
+        // Naver's share text sometimes drops the scheme.
+        let bare = matches(
+            of: #"(?:naver\.me|(?:m\.)?map\.naver\.com)/[^\s<>"']+"#,
+            in: text
+        )
+        if let host = bare.first, let url = URL(string: "https://" + host) {
+            return url
+        }
+        return schemed.first
+    }
+
+    /// Regex matches, with trailing sentence punctuation trimmed — a link at
+    /// the end of a sentence would otherwise swallow the full stop.
+    private static func matches(of pattern: String, in text: String) -> [String] {
+        guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]) else {
+            return []
+        }
+        let range = NSRange(text.startIndex..<text.endIndex, in: text)
+        let trailing = CharacterSet(charactersIn: ".,;:!?)]}\u{201d}\u{2019}")
+        return regex.matches(in: text, range: range).compactMap { match in
+            guard let found = Range(match.range, in: text) else { return nil }
+            let trimmed = String(text[found]).trimmingCharacters(in: trailing)
+            return trimmed.isEmpty ? nil : trimmed
+        }
     }
 
     /// The first line that is not itself a URL — Naver's share text leads with
