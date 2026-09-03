@@ -110,8 +110,13 @@ final class WatchSyncClient: NSObject, ObservableObject {
     }
 
     private func loadCachedPayload() -> SyncPayload? {
-        guard let data = try? Data(contentsOf: cacheURL) else { return nil }
-        return try? JSONDecoder.walkArrow.decode(SyncPayload.self, from: data)
+        guard let data = try? Data(contentsOf: cacheURL),
+              let payload = try? JSONDecoder.walkArrow.decode(SyncPayload.self, from: data) else {
+            return nil
+        }
+        // Relaunching hours later must not resume guidance along a route the
+        // walker has long since left.
+        return payload.discardingStaleRoute()
     }
 }
 

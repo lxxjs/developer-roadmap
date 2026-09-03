@@ -71,6 +71,37 @@ struct NavigationRequest: Codable, Equatable, Sendable {
     }
 }
 
+// MARK: - Staleness
+
+extension SyncPayload {
+    /// How long a cached route stays usable.
+    ///
+    /// A walking route older than this is stale on its own merits — the walker
+    /// is somewhere else by now, and resuming guidance from it would point them
+    /// off a path they are no longer on. It also keeps the app inside the terms
+    /// of route providers that cap how long their data may be retained; TMAP's
+    /// pedestrian API allows 24 hours, so this sits well under it.
+    static let maximumRouteAge: TimeInterval = 6 * 60 * 60
+
+    /// Drops a route that has aged out, keeping everything else.
+    ///
+    /// Destinations survive: they are the user's own saved places, not the
+    /// route provider's data, and they do not go stale.
+    func discardingStaleRoute(
+        olderThan maximumAge: TimeInterval = SyncPayload.maximumRouteAge,
+        now: Date = Date()
+    ) -> SyncPayload {
+        guard let route, now.timeIntervalSince(route.createdAt) > maximumAge else {
+            return self
+        }
+        var fresh = self
+        fresh.route = nil
+        fresh.status = .idle
+        fresh.failureMessage = nil
+        return fresh
+    }
+}
+
 // MARK: - Dictionary transport
 
 /// `WCSession` deals in `[String: Any]`, so each payload travels as one JSON

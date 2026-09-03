@@ -100,3 +100,63 @@ final class StoreAndSyncTests: XCTestCase {
         XCTAssertNil(NavigationRequest.decode(from: [SyncKey.stopNavigation: true]))
     }
 }
+
+/// A cached route must not outlive its usefulness. Resuming a stale one would
+/// guide the walker along a path they left hours ago, and route providers cap
+/// how long their data may be retained.
+final class PayloadStalenessTests: XCTestCase {
+    /// A fixed clock. Taking `Date()` both when building the fixture and when
+    /// checking it puts the boundary case a few microseconds over the limit,
+    /// which would make the test fail on its own construction.
+    private let now = Date(timeIntervalSince1970: 1_700_000_000)
+
+    private func payload(routeAge: TimeInterval) -> SyncPayload {
+        let destination = Destination(
+            name: "강남역",
+            point: GeoPoint(latitude: 37.4979, longitude: 127.0276),
+            source: .naverShare
+        )
+        let route = WalkRoute(
+            destination: destination,
+            points: [GeoPoint(latitude: 37.49, longitude: 127.02), destination.point],
+            totalDistance: 500,
+            expectedTravelTime: 400,
+            createdAt: now.addingTimeInterval(-routeAge)
+        )
+        return SyncPayload(destinations: [destination], route: route, status: .routed)
+    }
+
+    func testFreshRouteIsKept() {
+        let fresh = payload(routeAge: 60).discardingStaleRoute(now: now)
+        XCTAssertNotNil(fresh.route)
+        XCTAssertEqual(fresh.status, .routed)
+    }
+
+    func testStaleRouteIsDropped() {
+        let stale = payload(routeAge: SyncPayload.maximumRouteAge + 1).discardingStaleRoute(now: now)
+        XCTAssertNil(stale.route)
+        XCTAssertEqual(stale.status, .idle)
+    }
+
+    /// Saved places are the user's own and never expire with the route.
+    func testDestinationsSurviveAStaleRoute() {
+        let stale = payload(routeAge: 60 * 60 * 24 * 7).discardingStaleRoute(now: now)
+        XCTAssertEqual(stale.destinations.count, 1)
+        XCTAssertEqual(stale.destinations.first?.name, "강남역")
+    }
+
+    func testBoundaryIsInclusive() {
+        let exactly = payload(routeAge: SyncPayload.maximumRouteAge).discardingStaleRoute(now: now)
+        XCTAssertNotNil(exactly.route, "a route exactly at the limit is still usable")
+    }
+
+    func testPayloadWithoutARouteIsUnchanged() {
+        let idle = SyncPayload(destinations: [], route: nil, status: .idle)
+        XCTAssertEqual(idle.discardingStaleRoute(now: now), idle)
+    }
+
+    /// Well under the 24 hours TMAP's pedestrian API allows.
+    func testLimitStaysInsideProviderRetentionTerms() {
+        XCTAssertLessThan(SyncPayload.maximumRouteAge, 24 * 60 * 60)
+    }
+}
